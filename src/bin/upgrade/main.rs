@@ -4,7 +4,7 @@
         unused_qualifications)]
 
 extern crate cargo_metadata;
-extern crate docopt;
+extern crate clap;
 #[macro_use]
 extern crate error_chain;
 #[macro_use]
@@ -32,23 +32,19 @@ mod errors {
 }
 use errors::*;
 
-static USAGE: &'static str = r"
-Upgrade dependencies as specified in the local manifest file (i.e. Cargo.toml).
-
-Usage:
-    cargo upgrade [options] [<dependency>]...
+static USAGE: &'static str = r"cargo upgrade [options] [<dependency>]...
     cargo upgrade (-h | --help)
-    cargo upgrade (-V | --version)
+    cargo upgrade (-V | --version)";
 
-Options:
-    --all                   Upgrade all packages in the workspace.
-    --manifest-path PATH    Path to the manifest to upgrade.
-    --allow-prerelease      Include prerelease versions when fetching from crates.io (e.g.
-                            '0.6.0-alpha'). Defaults to false.
-    --dry-run               Print changes to be made without making them. Defaults to false.
-    -h --help               Show this help page.
-    -V --version            Show version.
+static ARGS: &'static str = "
+--all                   'Upgrade all packages in the workspace.'
+--manifest-path=[PATH]  'Path to the manifest to upgrade.'
+--allow-prerelease      'Include prerelease versions when fetching from crates.io (e.g. \
+                         \"0.6.0-alpha\"). Defaults to false.'
+--dry-run               'Print changes to be made without making them. Defaults to false.'
+<dependency>...         'The deps to upgrade'";
 
+static AFTER_HELP: &'static str = r#"
 This command differs from `cargo update`, which updates the dependency versions recorded in the
 local lock file (Cargo.lock).
 
@@ -60,10 +56,10 @@ supported. Git/path dependencies will be ignored.
 
 All packages in the workspace will be upgraded if the `--all` flag is supplied. The `--all` flag may
 be supplied in the presence of a virtual manifest.
-";
+"#;
 
-/// Docopts input args.
-#[derive(Debug, Deserialize)]
+/// clap's input args.
+#[derive(Debug)]
 struct Args {
     /// `<dependency>...`
     arg_dependency: Vec<String>,
@@ -75,8 +71,18 @@ struct Args {
     flag_allow_prerelease: bool,
     /// `--dry-run`
     flag_dry_run: bool,
-    /// `--version`
-    flag_version: bool,
+}
+
+impl<'a> From<&'a clap::ArgMatches<'a>> for Args {
+    fn from(m: &'a clap::ArgMatches<'a>) -> Self {
+        Args {
+            arg_dependency: m.values_of("dependency").unwrap().map(ToOwned::to_owned).collect(),
+            flag_manifest_path: m.value_of("manifest-path").map(ToOwned::to_owned),
+            flag_all: m.is_present("all"),
+            flag_allow_prerelease: m.is_present("allow-prerelease"),
+            flag_dry_run: m.is_present("dry-run"),
+        }
+    }
 }
 
 /// A collection of manifests.
@@ -255,14 +261,21 @@ fn process(args: Args) -> Result<()> {
 }
 
 fn main() {
-    let args = docopt::Docopt::new(USAGE)
-        .and_then(|d| d.deserialize::<Args>())
-        .unwrap_or_else(|err| err.exit());
-
-    if args.flag_version {
-        println!("cargo-upgrade version {}", env!("CARGO_PKG_VERSION"));
-        process::exit(0);
-    }
+    let args: Args = clap::App::new("cargo-edit-upgrade")
+        .bin_name("cargo")
+        .setting(clap::AppSettings::SubcommandRequired)
+        .subcommand(clap::SubCommand::with_name("upgrade")
+            .usage(USAGE)
+            .about("Upgrade dependencies as specified in the local manifest file (i.e. Cargo.toml).")
+            .version(&*format!("version {}", env!("CARGO_PKG_VERSION")))
+            .setting(clap::AppSettings::UnifiedHelpMessage)
+            .args_from_usage(ARGS)
+            .after_help(AFTER_HELP)
+        )
+        .get_matches()
+        .subcommand_matches("upgrade")
+        .unwrap()
+        .into();
 
     if let Err(err) = process(args) {
         eprintln!("Command failed due to unhandled error: {}\n", err);
