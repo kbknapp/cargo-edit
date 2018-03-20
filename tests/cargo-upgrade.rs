@@ -285,12 +285,14 @@ fn unknown_flags() {
     assert_cli::Assert::command(&["target/debug/cargo-upgrade", "upgrade", "foo", "--flag"])
         .fails_with(1)
         .prints_error_exactly(
-            "Unknown flag: '--flag'
+            "error: Found argument '--flag' which wasn't expected, or isn't valid in this context
 
-Usage:
+USAGE:
     cargo upgrade [options] [<dependency>]...
     cargo upgrade (-h | --help)
-    cargo upgrade (-V | --version)",
+    cargo upgrade (-V | --version)
+
+For more information try --help",
         )
         .unwrap();
 }

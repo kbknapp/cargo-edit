@@ -129,12 +129,16 @@ fn no_argument() {
     assert_cli::Assert::command(&["target/debug/cargo-rm", "rm"])
         .fails_with(1)
         .prints_error_exactly(
-            r"Invalid arguments.
+            r"error: The following required arguments were not provided:
+    <crate>
 
-Usage:
+USAGE:
     cargo rm <crate> [--dev|--build] [options]
     cargo rm (-h|--help)
-    cargo rm --version",
+    cargo rm --version
+
+
+For more information try --help",
         )
         .unwrap();
 }
@@ -144,12 +148,15 @@ fn unknown_flags() {
     assert_cli::Assert::command(&["target/debug/cargo-rm", "rm", "foo", "--flag"])
         .fails_with(1)
         .prints_error_exactly(
-            r"Unknown flag: '--flag'
+            r"error: Found argument '--flag' which wasn't expected, or isn't valid in this context
 
-Usage:
+USAGE:
     cargo rm <crate> [--dev|--build] [options]
     cargo rm (-h|--help)
-    cargo rm --version",
+    cargo rm --version
+
+
+For more information try --help",
         )
         .unwrap();
 }
