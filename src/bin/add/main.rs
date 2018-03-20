@@ -4,7 +4,7 @@
         unused_qualifications)]
 
 extern crate atty;
-extern crate docopt;
+extern crate clap;
 #[macro_use]
 extern crate error_chain;
 extern crate semver;
@@ -21,6 +21,7 @@ use cargo_edit::{Dependency, Manifest};
 
 mod args;
 use args::Args;
+use args::DepKind;
 
 mod errors {
     error_chain!{
@@ -34,48 +35,40 @@ mod errors {
 }
 use errors::*;
 
-static USAGE: &'static str = r#"
-Usage:
-    cargo add <crate> [--dev|--build|--optional] [--vers=<ver>|--git=<uri>|--path=<uri>] [options]
+static USAGE: &'static str = r#"cargo add <crate> [--dev|--build|--optional] [--vers=<ver>|--git=<uri>|--path=<uri>] [options]
     cargo add <crates>... [--dev|--build|--optional] [options]
     cargo add (-h|--help)
     cargo add --version
+"#;
 
-Specify what crate to add:
-    --vers <ver>            Specify the version to grab from the registry (crates.io).
-                            You can also specify versions as part of the name, e.g
-                            `cargo add bitflags@0.3.2`.
-    --git <uri>             Specify a git repository to download the crate from.
-    --path <uri>            Specify the path the crate should be loaded from.
-
-Specify where to add the crate:
-    -D --dev                Add crate as development dependency.
-    -B --build              Add crate as build dependency.
-    --optional              Add as an optional dependency (for use in features). This does not work
-                            for `dev-dependencies` or `build-dependencies`.
-    --target <target>       Add as dependency to the given target platform. This does not work
-                            for `dev-dependencies` or `build-dependencies`.
-
-Options:
-    --upgrade=<method>      Choose method of semantic version upgrade. Must be one of
-                            "none" (exact version), "patch" (`~` modifier), "minor"
-                            (`^` modifier, default), or "all" (`>=`).
-    --manifest-path=<path>  Path to the manifest to add a dependency to.
-    --allow-prerelease      Include prerelease versions when fetching from crates.io (e.g.
-                            '0.6.0-alpha'). Defaults to false.
-    -q --quiet              Do not print any output in case of success.
-    -h --help               Show this help page.
-    -V --version            Show version.
-
-This command allows you to add a dependency to a Cargo.toml manifest file. If <crate> is a github
+static ABOUT: &'static str = r#"This command allows you to add a dependency to a Cargo.toml manifest file. If <crate> is a github
 or gitlab repository URL, or a local path, `cargo add` will try to automatically get the crate name
-and set the appropriate `--git` or `--path` value.
+and set the appropriate `--git` or `--path` value."#;
+
+static AFTER_HELP: &'static str = r#"
 
 Please note that Cargo treats versions like "1.2.3" as "^1.2.3" (and that "^1.2.3" is specified
 as ">=1.2.3 and <2.0.0"). By default, `cargo add` will use this format, as it is the one that the
 crates.io registry suggests. One goal of `cargo add` is to prevent you from using wildcard
 dependencies (version set to "*").
 "#;
+
+static ARGS: &'static str = "
+--vers [ver]            'Specify the version to grab from the registry (crates.io). \
+                        You can also specify versions as part of the name, e.g \
+                        `cargo add bitflags@0.3.2`.'
+--git [uri]             'Specify a git repository to download the crate from.'
+-D --dev                'Add crate as development dependency.'
+-B --build              'Add crate as build dependency.'
+--optional              'Add as an optional dependency (for use in features). This does not work \
+                        for `dev-dependencies` or `build-dependencies`.'
+--target [target]       'Add as dependency to the given target platform. This does not work \
+                        for `dev-dependencies` or `build-dependencies`.'
+--manifest-path [path]  'Path to the manifest to add a dependency to.'
+--allow-prerelease      'Include prerelease versions when fetching from crates.io (e.g. \
+                        \"0.6.0-alpha\"). Defaults to false.'
+-q --quiet              'Do not print any output in case of success.'
+<crates>...             'The crate(s) to add'";
 
 fn print_msg(dep: &Dependency, section: &[String], optional: bool) -> Result<()> {
     let colorchoice = if atty::is(atty::Stream::Stdout) {
@@ -114,7 +107,7 @@ fn handle_add(args: &Args) -> Result<()> {
     deps.iter()
         .map(|dep| {
             if !args.flag_quiet {
-                print_msg(dep, &args.get_section(), args.flag_optional)?;
+                print_msg(dep, &args.get_section(), args.dep_kind == DepKind::Optional)?;
             }
             manifest
                 .insert_into_table(&args.get_section(), dep)
@@ -133,14 +126,39 @@ fn handle_add(args: &Args) -> Result<()> {
 }
 
 fn main() {
-    let args = docopt::Docopt::new(USAGE)
-        .and_then(|d| d.deserialize::<Args>())
-        .unwrap_or_else(|err| err.exit());
-
-    if args.flag_version {
-        println!("cargo-add version {}", env!("CARGO_PKG_VERSION"));
-        process::exit(0);
-    }
+    let args: Args = clap::App::new("cargo-edit-add")
+        .bin_name("cargo")
+        .setting(clap::AppSettings::SubcommandRequired)
+        .subcommand(clap::SubCommand::with_name("add")
+            .usage(USAGE)
+            .about(ABOUT)
+            .version(&*format!("version {}", env!("CARGO_PKG_VERSION")))
+            .setting(clap::AppSettings::UnifiedHelpMessage)
+            .args_from_usage(ARGS)
+            .arg(clap::Arg::from_usage("--upgrade=[method]   'Choose method of semantic version upgrade.'")
+                .long_help(
+                    "Choose a method of semantic version upgrades. The modifiers for the various \
+                    methods are\n\t\
+                        '=' (none) which is an exact match\n\t\
+                        '~' (patch)\n\t\
+                        '^' (minor)\n\t\
+                        '>=' (all)).")
+                .case_insensitive(true)
+                .possible_values(&["none", "patch", "minor", "all"])
+                .default_value("minor"))
+            .arg(
+                clap::Arg::from_usage(
+                    "--path [uri]  'Specify the path the crate should be loaded from.'"
+                )
+                .conflicts_with("git"))
+            .group(clap::ArgGroup::with_name("type")
+                .args(&["dev", "build", "optional"]))
+            .after_help(AFTER_HELP)
+        )
+        .get_matches()
+        .subcommand_matches("add")
+        .unwrap()
+        .into();
 
     if let Err(err) = handle_add(&args) {
         eprintln!("Command failed due to unhandled error: {}\n", err);
